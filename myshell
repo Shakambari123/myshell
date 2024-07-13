@@ -1,0 +1,635 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>   // exit()
+#include <unistd.h>   // fork(), getpid(), exec()
+#include <sys/wait.h> // wait()
+#include <signal.h>   // signal()
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/types.h>
+
+// close(), open()
+#define MAX_INPUT_SIZE 1024
+#define MAX_COMMANDS 10
+#define MAX_ARGS 10
+
+int flag = 1;
+void execute(char **args, char *outputFile)
+{
+  // printf("%s",outputFile);
+  pid_t pid = fork();
+  if (pid < 0)
+  {
+    perror("Fork error");
+    exit(EXIT_FAILURE);
+  }
+  else if (pid == 0)
+  { // Child process
+    int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+    {
+      perror("Error opening output file");
+      exit(EXIT_FAILURE);
+    }
+
+    // Redirect stdout to the specified file
+    dup2(fd, STDOUT_FILENO);
+    close(fd);
+
+    // Execute the command
+    execvp(args[0], args);
+    perror("Error executing the command");
+    exit(EXIT_FAILURE);
+  }
+  else
+  { // Parent process
+    int child_status;
+    waitpid(pid, &child_status, 0);
+    if (WIFEXITED(child_status) && WEXITSTATUS(child_status) != 0)
+    {
+      fprintf(stderr, "Shell: Error executing command\n");
+    }
+  }
+}
+
+void executeCommandRedirection(char **args, char *outputFile)
+{
+  // printf("hello\n");
+  int idx = 0, j, k = 0;
+  char *temp = outputFile;
+  // Iterate String until last
+  // leading space character
+  while (outputFile[idx] == ' ' || outputFile[idx] == '\t' || outputFile[idx] == '\n')
+  {
+    idx++;
+  }
+
+  // Run a for loop from index until the original
+  // string ends and copy the content of str to str1
+  for (j = idx; outputFile[j] != '\0'; j++)
+  {
+    temp[k] = outputFile[j];
+    k++;
+  }
+
+  // Insert a string terminating character
+  // at the end of new string
+  temp[k] = '\0';
+
+  /* for (int i = 0; args[i] != NULL; i++) {
+      printf("Argument %d:%s\n", i, args[i]);
+  }*/
+  // printf("Output File: %s\n", outputFile);
+  //  This function will run a single command with output redirected to an output file specificed by user
+  pid_t pid = fork();
+  if (pid < 0)
+  { // Handle fork error
+    printf("Shell: Incorrect command\n");
+  }
+  else if (pid == 0)
+  { // Child process
+    close(STDOUT_FILENO);
+    open(outputFile, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    /* int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+     if (fd < 0)
+     { // Handle file open error
+         printf("Shell: Incorrect command\n");
+
+         exit(EXIT_FAILURE);
+     } // Redirect stdout to the specified file
+
+     // Flush the stdout buffer to ensure no pending output
+     // fflush(stdout);
+     dup2(fd, STDOUT_FILENO);
+     dup2(fd, STDERR_FILENO);
+     close(fd); */
+    // Execute the command
+    args[1] = NULL;
+    execvp(args[0], args); // If execvp fails, print error message and exit
+    printf("Shell: Incorrect command\n");
+    exit(EXIT_FAILURE);
+  }
+  else
+  { // Parent process
+    wait(NULL);
+  }
+}
+
+void executeSequentialCommands(char *arr[MAX_COMMANDS][MAX_ARGS], int num_arr)
+{
+  for (int p = 0; p < num_arr; p++)
+  {
+    pid_t child_pid = fork();
+    if (child_pid == 0)
+    {
+      // Child process
+      execvp(arr[p][0], arr[p]);
+      // perror("Shell:Error executing the command");
+      // fprintf(stderr,"Shell:Incorrect Command\n");
+      printf("Shell: Incorrect command\n");
+      exit(EXIT_FAILURE);
+    }
+    else if (child_pid < 0)
+    {
+      // perror("Shell:Error Forking");
+      printf("Shell: Incorrect command\n");
+    }
+    else
+    {
+      // Parent process
+      int child_status;
+      waitpid(child_pid, &child_status, 0);
+
+      if (WIFEXITED(child_status) && WEXITSTATUS(child_status) != 0)
+      {
+        // fprintf(stderr, "Shell: Error executing command\n");
+        printf("Shell: Incorrect command\n");
+      }
+    }
+  }
+}
+
+/*void executeParallelCommands(char *arr[MAX_COMMANDS][MAX_ARGS], int num_arr) {
+printf("%d",num_arr);
+
+
+    for (int n = 0; n < num_arr; n++) {
+        pid_t child_pid = fork();
+        if (child_pid == 0) {
+            // Child process
+             printf("Child %d: PID = %d\n", n + 1, getpid());
+            execvp(arr[n][0], arr[n]);
+            //perror("Shell:Error executing the command");
+            printf("Shell: Incorrect command\n");
+            exit(EXIT_FAILURE);
+        } else if (child_pid < 0) {
+            printf("Shell: Incorrect command\n");
+        }
+    }
+
+    // Wait for a specific child process to finish
+   /* for (int i = 0; i < num_arr; i++) {
+        int child_status;
+        wait(&child_status);
+    }*/
+
+// wait(NULL);
+
+// printf("exiting parent process!!!\n");
+//}*/
+
+void sigintHandler(int signum)
+{
+  // printf("\nReceived SIGINT (Ctrl+C)\n");
+  flag = 0;
+}
+
+void sigtstpHandler(int signum)
+{
+  // printf("\nReceived SIGTSTP (Ctrl+Z)\n");
+  flag = 0;
+}
+
+void parse(char *input, char *com[MAX_ARGS])
+{
+  int l = 0;
+  char *token;
+  char *remaining = input; // Initialize 'remaining' with input
+
+  while ((token = strsep(&remaining, ">")) != NULL)
+  {
+    com[l] = token;
+    l++;
+  }
+
+  com[l] = NULL;
+}
+void parseSpace(char *input, char *com[MAX_ARGS])
+{
+  int m = 0;
+  char *token;
+  char *remaining = input; // Initialize 'remaining' with input
+
+  while ((token = strsep(&remaining, " ")) != NULL)
+  {
+    com[m] = token;
+    m++;
+  }
+
+  com[m] = NULL;
+}
+void executeCommandPipeline(char *a[MAX_COMMANDS], int num_a)
+{
+  // Create pipes for communication between commands
+  int pipes[num_a - 1][2];
+
+  for (int i = 0; i < num_a - 1; i++)
+  {
+    if (pipe(pipes[i]) == -1)
+    {
+      perror("Pipe creation failed");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  for (int i = 0; i < num_a; i++)
+  {
+    pid_t child_pid = fork();
+
+    if (child_pid == 0)
+    {
+      // Child process
+
+      // Redirect input from the previous command's output
+      if (i > 0)
+      {
+        dup2(pipes[i - 1][0], STDIN_FILENO);
+        close(pipes[i - 1][0]); // Close the read end of the previous pipe
+        close(pipes[i - 1][1]); // Close the write end of the previous pipe
+      }
+
+      // Redirect output to the next command's input
+      if (i < num_a - 1)
+      {
+        dup2(pipes[i][1], STDOUT_FILENO);
+        close(pipes[i][0]); // Close the read end of the current pipe
+        close(pipes[i][1]); // Close the write end of the current pipe
+      }
+
+      // Close pipe file descriptors
+      for (int j = 0; j < num_a - 1; j++)
+      {
+        close(pipes[j][0]);
+        close(pipes[j][1]);
+      }
+
+      // Execute the command
+      char *args[MAX_ARGS];
+      parseSpace(a[i], args);
+      execvp(args[0], args);
+
+      perror("Command execution failed");
+      exit(EXIT_FAILURE);
+    }
+    else if (child_pid > 0)
+    {
+      // Parent process
+
+      // Close pipe file descriptors in the parent
+      if (i > 0)
+      {
+        close(pipes[i - 1][0]);
+        close(pipes[i - 1][1]);
+      }
+    }
+    else
+    {
+      perror("Fork failed");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  // Wait for all child processes to complete
+  for (int i = 0; i < num_a; i++)
+  {
+    wait(NULL);
+  }
+}
+void parsePipe(char *input, char *a[MAX_COMMANDS], int *num_a)
+{
+  *num_a = 0; // Initialize the number of commands to 0
+
+  // Split the input into separate commands based on '|'
+  char *token = strtok(input, "|");
+  while (token != NULL)
+  {
+    if (*num_a >= MAX_COMMANDS)
+    {
+      fprintf(stderr, "Exceeded maximum number of commands in pipeline\n");
+      exit(EXIT_FAILURE);
+    }
+
+    // Trim leading and trailing spaces from the command
+    char *trimmed_command = token;
+    while (*trimmed_command == ' ' || *trimmed_command == '\t')
+    {
+      trimmed_command++;
+    }
+    size_t len = strlen(trimmed_command);
+    while (len > 0 && (trimmed_command[len - 1] == ' ' || trimmed_command[len - 1] == '\t'))
+    {
+      trimmed_command[--len] = '\0';
+    }
+
+    // Store the trimmed command in the 'commands' array
+    a[(*num_a)++] = trimmed_command;
+
+    token = strtok(NULL, "|");
+  }
+}
+void parseInput(char *input, char *arr[MAX_COMMANDS][MAX_ARGS], int *num_arr)
+{
+  char *input_copy = strdup(input); // Copy of the input string
+  *num_arr = 0;                     // Initialize the number of commands to 0
+
+  char *cmd_delimiters = "&&##"; // Command delimiters
+
+  char *cmd_token = strsep(&input_copy, cmd_delimiters);
+  while (cmd_token != NULL)
+  {
+    if (strlen(cmd_token) > 0)
+    {
+      char *cmd_args[MAX_ARGS];
+      int arg_index = 0;
+
+      // Tokenize the command arguments using spaces
+      char *arg_delimiters = " ";
+      char *arg_token = strsep(&cmd_token, arg_delimiters);
+
+      while (arg_token != NULL)
+      {
+        if (strlen(arg_token) > 0)
+        {
+          // Handle redirection and associated file separately
+          if (strcmp(arg_token, ">") == 0)
+          {
+            arg_token = strsep(&cmd_token, arg_delimiters); // Get the redirection file
+            if (arg_token != NULL && strlen(arg_token) > 0)
+            {
+              // Store redirection argument and file separately
+              arr[*num_arr][arg_index++] = ">";
+              arr[*num_arr][arg_index++] = arg_token;
+            }
+          }
+          else
+          {
+            cmd_args[arg_index++] = arg_token;
+          }
+        }
+        arg_token = strsep(&cmd_token, arg_delimiters);
+      }
+      cmd_args[arg_index] = NULL; // NULL-terminate arguments
+
+      // Copy the command arguments to the commands array
+      for (int m = 0; m <= arg_index; m++)
+      {
+        arr[*num_arr][m] = cmd_args[m];
+      }
+
+      (*num_arr)++;
+      if (*num_arr >= MAX_COMMANDS)
+      {
+        fprintf(stderr, "Exceeded maximum number of commands\n");
+        exit(EXIT_FAILURE);
+      }
+    }
+    cmd_token = strsep(&input_copy, cmd_delimiters);
+  }
+  // printf("executing free(input_copy) in parseInput");
+  //  free(input_copy); // Free the copied input string
+}
+
+void executeParallelCommands(char *args[MAX_ARGS])
+{
+  pid_t pid = fork();
+
+  if (pid == 0)
+  {
+    // Child process
+    execvp(args[0], args);
+    perror("Execution failed");
+    exit(EXIT_FAILURE);
+  }
+  else if (pid < 0)
+  {
+    perror("Fork failed");
+    exit(EXIT_FAILURE);
+  }
+  // Parent process continues without waiting for the child.
+}
+
+int main()
+{
+  // printf("code execution started\n");
+  // fflush(stdout);
+
+  signal(SIGINT, sigintHandler);
+  signal(SIGTSTP, sigtstpHandler);
+
+  while (1)
+  {
+
+    // Print the prompt in format - currentWorkingDirectory$
+    char currwd[1024]; // Buffer to hold the current working directory
+    if (getcwd(currwd, sizeof(currwd)) != NULL)
+    {
+
+      printf("%s$", currwd);
+    }
+    else
+    {
+      perror("getcwd"); // Print an error message if getcurrwd fails
+      exit(EXIT_FAILURE);
+    }
+
+    // accept input
+    char *input = NULL;
+    size_t input_size = 0;
+    ssize_t read_size;
+
+    read_size = getline(&input, &input_size, stdin);
+    if (read_size == -1)
+    {
+      perror("getline");
+      exit(EXIT_FAILURE);
+    }
+    // Remove newline character from the input
+    input[read_size - 1] = '\0';
+
+    // Parse user input
+    // Remove prompt before parsing
+    // input += strlen(currwd) + 2; // +2 to account for the space and '$'
+    char *arr[MAX_COMMANDS][MAX_ARGS];
+    int num_arr;
+
+    parseInput(input, arr, &num_arr);
+    if (num_arr > 0 && strcmp(arr[0][0], "exit") == 0)
+    {
+      printf("Exiting shell...\n");
+      //  printf("executing free(input_copy) in exit");
+      // free(input);// Exit the loop
+      exit(0);
+    }
+
+    // Process parsed commands DONT FORGET TO REMOVE THIS IN THE END
+    /* for (int i = 0; i < num_arr; i++) {
+        for (int j = 0; arr[i][j] != NULL; j++) {
+             printf("Command %d Argument %d: %s\n", i, j, arr[i][j]);
+         }
+     }*/
+
+    char *sequential_delim = "##";
+    char *parallel_delim = "&&";
+    char *input_copy = strdup(input); // Create a copy of the input for parsing
+
+    char *sequential_token = strsep(&input_copy, sequential_delim);
+
+    while (sequential_token != NULL)
+    {
+      char *arr[MAX_COMMANDS][MAX_ARGS];
+      int num_arr;
+
+      parseInput(sequential_token, arr, &num_arr);
+
+      if (strstr(sequential_token, parallel_delim))
+      {
+        // This is a parallel command
+        // printf("entered here\n");
+        int j;
+        for (int i = 0; arr[i][0] != NULL && i < num_arr; i++)
+        {
+          // for (j = 0; arr[i][j] != NULL && j < MAX_ARGS; j++) {
+          //}
+          if (arr[i][j] == NULL || j == MAX_ARGS)
+            arr[i][j] = NULL;
+
+          // printf("%d %d given NULL value\n",i,j);
+        }
+
+        for (int i = 0; i < num_arr; i++)
+        {
+          executeParallelCommands(arr[i]);
+        }
+        // Wait for all child processes to finish
+        for (int i = 0; i < num_arr; i++)
+        {
+          int child_status;
+          wait(&child_status);
+        }
+        // printf("exited from here\n");
+
+        //    executeParallelCommands(arr, num_arr);
+      }
+      else if (strstr(sequential_token, sequential_delim))
+      {
+        executeSequentialCommands(arr, num_arr);
+      }
+      else if (strstr(input, ">")) // ask for appropriate parse function
+      {
+        char *delimiter = ">";
+        char *com[MAX_ARGS]; //! d array unlike arr
+        parse(input, com);
+        char *args[MAX_ARGS];
+        char *outputFile = NULL;
+        parseSpace(com[0], args);
+        outputFile = com[1];
+        if (strcmp(args[0], "echo") == 0)
+        {
+          execute(args, outputFile);
+        }
+        else
+        {
+          executeCommandRedirection(args, outputFile);
+        }
+      }
+      else if (strstr(input, "|"))
+      {
+        char *a[MAX_COMMANDS]; // a stands for commands
+        int num_a;
+        parsePipe(input, a, &num_a);
+        executeCommandPipeline(a, num_a);
+      }
+
+      else
+      {
+
+        // Process parsed commands
+        for (int i = 0; i < num_arr; i++)
+        {
+          if (arr[i][0] != NULL)
+          {
+
+            // Check for built-in commands
+            if (strcmp(arr[i][0], "cd") == 0)
+            {
+              // printf("Changing directory to: %s\n", arr[i][1]);
+              // Handle 'cd' command
+              if (arr[i][1] != NULL)
+              {
+                if (strcmp(arr[i][1], "..") == 0)
+                {
+                  // Change to parent directory
+                  chdir("..");
+                }
+                else
+                {
+                  // Change to the specified directory
+
+                  if (chdir(arr[i][1]) != 0)
+                  {
+                    // perror("cd");
+                    printf("Shell: Incorrect command in cd\n");
+                  }
+                }
+              }
+            }
+            else
+            {
+              // Handle other commands using fork, exec, and wait
+              // ...
+              // executeCommand(input);
+              // This function will fork a new process to execute a command
+              pid_t child_pid = fork();
+              if (child_pid == 0)
+              {
+                // Child process
+                execvp(arr[i][0], arr[i]);
+                // perror("Shell:Error executing the command");
+                printf("Shell: Incorrect command\n");
+                exit(EXIT_FAILURE);
+              }
+              else if (child_pid > 0)
+              {
+                // Parent process
+                int child_status;
+                waitpid(child_pid, &child_status, 0);
+
+                if (WIFEXITED(child_status) && WEXITSTATUS(child_status) != 0)
+                {
+                  // fprintf(stderr, "Shell: Error executing command\n");
+                  // printf("Shell: Incorrect command\n");
+                  // exit(EXIT_FAILURE);
+                }
+              }
+              else
+              {
+                // perror("Shell:Incorrect Command\n");
+                printf("Shell: Incorrect command\n");
+              }
+            }
+          }
+          else
+          {
+            // fprintf(stderr,"Shell:Incorrect Command\n");
+            printf("Shell: Incorrect command\n");
+          }
+
+          if (flag == 0)
+          {
+            printf("%s$", currwd);
+          }
+          // printf("value of flag is %d",flag);
+
+          flag = 1;
+          // printf("executing free(input) in processing parsed commands");
+          // free(input);
+        }
+      }
+
+      sequential_token = strsep(&input_copy, sequential_delim);
+    }
+    // printf("executing free(input_copy) at the end of 1 iteration of while loop");
+    //  free(input_copy); // Free memory allocated for input_copy
+  }
+  return 0;
+}
